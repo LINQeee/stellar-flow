@@ -14,25 +14,29 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.Flow = exports.flow = void 0;
 const axios_1 = __importDefault(require("axios"));
+const buffer_1 = require("buffer");
 const cachePreInterceptor = (reqConfig) => __awaiter(void 0, void 0, void 0, function* () {
     if (!reqConfig.cacheKey)
-        return true;
-    const savedResult = localStorage.getItem(`FLOW-CACHE-KEY-${reqConfig.cacheKey}-${getPayloadHashCode(reqConfig)}`);
-    const savedDate = +localStorage.getItem(`FLOW-CACHE-KEY-DATE-${reqConfig.cacheKey}-${getPayloadHashCode(reqConfig)}`);
+        return reqConfig;
+    reqConfig.initialUrl = reqConfig.url;
+    const savedResult = localStorage.getItem(`FLOW-CACHE-KEY-${reqConfig.cacheKey}-${getPayloadHashCode(reqConfig)}-${reqConfig.url}`);
+    const savedDate = +localStorage.getItem(`FLOW-CACHE-KEY-DATE-${reqConfig.cacheKey}-${getPayloadHashCode(reqConfig)}-${reqConfig.url}`);
     if (savedResult !== null) {
         if (reqConfig.cacheLifetime && Date.now() - savedDate > reqConfig.cacheLifetime) {
-            localStorage.removeItem(`FLOW-CACHE-KEY-${reqConfig.cacheKey}`);
-            localStorage.removeItem(`FLOW-CACHE-KEY-DATE-${reqConfig.cacheKey}`);
-            return true;
+            localStorage.removeItem(`FLOW-CACHE-KEY-${reqConfig.cacheKey}-${reqConfig.url}`);
+            localStorage.removeItem(`FLOW-CACHE-KEY-DATE-${reqConfig.cacheKey}-${reqConfig.url}`);
+            reqConfig.enabled = true;
+            return reqConfig;
         }
         reqConfig.cachedResult = JSON.parse(savedResult);
+        reqConfig.enabled = false;
     }
-    return false;
+    return reqConfig;
 });
 const cachePostInterceptor = (result, reqConfig) => __awaiter(void 0, void 0, void 0, function* () {
     if (reqConfig.cacheKey) {
-        localStorage.setItem(`FLOW-CACHE-KEY-${reqConfig.cacheKey}-${getPayloadHashCode(reqConfig)}`, JSON.stringify(result));
-        localStorage.setItem(`FLOW-CACHE-KEY-DATE-${reqConfig.cacheKey}-${getPayloadHashCode(reqConfig)}`, Date.now().toString());
+        localStorage.setItem(`FLOW-CACHE-KEY-${reqConfig.cacheKey}-${getPayloadHashCode(reqConfig)}-${reqConfig.initialUrl}`, JSON.stringify(result));
+        localStorage.setItem(`FLOW-CACHE-KEY-DATE-${reqConfig.cacheKey}-${getPayloadHashCode(reqConfig)}-${reqConfig.initialUrl}`, Date.now().toString());
     }
 });
 const postInterceptors = [cachePostInterceptor];
@@ -40,8 +44,11 @@ const preInterceptors = [cachePreInterceptor];
 const sendRequest = (reqConfig, config) => __awaiter(void 0, void 0, void 0, function* () {
     var _a;
     if (config === null || config === void 0 ? void 0 : config.baseURL)
-        reqConfig.baseURL = config.baseURL;
-    if (preInterceptors.some((i) => __awaiter(void 0, void 0, void 0, function* () { return !(yield i(reqConfig, config)); })))
+        reqConfig.url = config.baseURL + reqConfig.url;
+    for (let i of preInterceptors) {
+        reqConfig = yield i(reqConfig, config);
+    }
+    if (reqConfig.enabled === false)
         return reqConfig.cachedResult || {};
     let result;
     try {
@@ -55,7 +62,7 @@ const sendRequest = (reqConfig, config) => __awaiter(void 0, void 0, void 0, fun
         }
         else {
             const serverError = (_a = error.response) === null || _a === void 0 ? void 0 : _a.data;
-            if (serverError instanceof ArrayBuffer || serverError instanceof Buffer) {
+            if (serverError instanceof ArrayBuffer || serverError instanceof buffer_1.Buffer) {
                 try {
                     const parsedError = JSON.parse(new TextDecoder().decode(serverError));
                     result = { error: parsedError };
@@ -98,7 +105,7 @@ class Flow {
 }
 exports.Flow = Flow;
 const getPayloadHashCode = (reqConfig) => {
-    const str = JSON.stringify(reqConfig.data);
+    const str = JSON.stringify(reqConfig.data || '{}');
     let hash = 0, i, chr;
     if (str.length === 0)
         return hash;

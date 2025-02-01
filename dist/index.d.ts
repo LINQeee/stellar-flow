@@ -5,13 +5,14 @@ interface FlowRequestConfig extends AxiosRequestConfig {
     cacheKey?: string;
     cachedResult?: FlowResult<any, any>;
     cacheLifetime?: number;
-    cacheOnlySuccess?: boolean;
+    enabled?: boolean;
+    initialUrl?: string;
 }
 interface FlowConfig {
     baseURL?: string;
 }
 type postInterceptorType = (result: FlowResult<any, any>, config: FlowRequestConfig) => Promise<any>;
-type preInterceptorType = (reqConfig: FlowRequestConfig, config?: FlowConfig) => Promise<boolean>;
+type preInterceptorType = (reqConfig: FlowRequestConfig, config?: FlowConfig) => Promise<FlowRequestConfig>;
 interface FlowResult<Data, Error> {
     data?: Data;
     error?: Error;

@@ -1,4 +1,5 @@
 import axios, { AxiosRequestConfig } from "axios"
+import { Buffer } from "buffer"
 
 interface FlowRequestConfig extends AxiosRequestConfig {
     outputResult?: boolean
@@ -6,7 +7,9 @@ interface FlowRequestConfig extends AxiosRequestConfig {
     cacheKey?: string
     cachedResult?: FlowResult<any, any>
     cacheLifetime?: number
-    cacheOnlySuccess?: boolean
+    enabled?: boolean
+    initialUrl?: string
+
 }
 
 interface FlowConfig {
@@ -14,27 +17,30 @@ interface FlowConfig {
 }
 
 type postInterceptorType = (result: FlowResult<any, any>, config: FlowRequestConfig) => Promise<any>
-type preInterceptorType = (reqConfig: FlowRequestConfig, config?: FlowConfig) => Promise<boolean>
+type preInterceptorType = (reqConfig: FlowRequestConfig, config?: FlowConfig) => Promise<FlowRequestConfig>
 
 const cachePreInterceptor = async (reqConfig: FlowRequestConfig) => {
-    if (!reqConfig.cacheKey) return true
-    const savedResult = localStorage.getItem(`FLOW-CACHE-KEY-${reqConfig.cacheKey}-${getPayloadHashCode(reqConfig)}`)
-    const savedDate = +localStorage.getItem(`FLOW-CACHE-KEY-DATE-${reqConfig.cacheKey}-${getPayloadHashCode(reqConfig)}`)!
+    if (!reqConfig.cacheKey) return reqConfig
+    reqConfig.initialUrl = reqConfig.url
+    const savedResult = localStorage.getItem(`FLOW-CACHE-KEY-${reqConfig.cacheKey}-${getPayloadHashCode(reqConfig)}-${reqConfig.url}`)
+    const savedDate = +localStorage.getItem(`FLOW-CACHE-KEY-DATE-${reqConfig.cacheKey}-${getPayloadHashCode(reqConfig)}-${reqConfig.url}`)!
     if (savedResult !== null) {
         if (reqConfig.cacheLifetime && Date.now() - savedDate > reqConfig.cacheLifetime) {
-            localStorage.removeItem(`FLOW-CACHE-KEY-${reqConfig.cacheKey}`)
-            localStorage.removeItem(`FLOW-CACHE-KEY-DATE-${reqConfig.cacheKey}`)
-            return true
+            localStorage.removeItem(`FLOW-CACHE-KEY-${reqConfig.cacheKey}-${reqConfig.url}`)
+            localStorage.removeItem(`FLOW-CACHE-KEY-DATE-${reqConfig.cacheKey}-${reqConfig.url}`)
+            reqConfig.enabled = true
+            return reqConfig
         }
         reqConfig.cachedResult = JSON.parse(savedResult)
+        reqConfig.enabled = false
     }
-    return false
+    return reqConfig
 }
 
 const cachePostInterceptor = async (result: FlowResult<any, any>, reqConfig: FlowRequestConfig) => {
     if (reqConfig.cacheKey) {
-        localStorage.setItem(`FLOW-CACHE-KEY-${reqConfig.cacheKey}-${getPayloadHashCode(reqConfig)}`, JSON.stringify(result))
-        localStorage.setItem(`FLOW-CACHE-KEY-DATE-${reqConfig.cacheKey}-${getPayloadHashCode(reqConfig)}`, Date.now().toString())
+        localStorage.setItem(`FLOW-CACHE-KEY-${reqConfig.cacheKey}-${getPayloadHashCode(reqConfig)}-${reqConfig.initialUrl}`, JSON.stringify(result))
+        localStorage.setItem(`FLOW-CACHE-KEY-DATE-${reqConfig.cacheKey}-${getPayloadHashCode(reqConfig)}-${reqConfig.initialUrl}`, Date.now().toString())
     }
 }
 
@@ -47,9 +53,12 @@ interface FlowResult<Data, Error> {
 }
 
 const sendRequest = async <ResponseData, ErrorType>(reqConfig: FlowRequestConfig, config?: FlowConfig): Promise<FlowResult<ResponseData, ErrorType>> => {
-    if (config?.baseURL) reqConfig.baseURL = config.baseURL
+    if (config?.baseURL) reqConfig.url = config.baseURL + reqConfig.url
 
-    if (preInterceptors.some(async (i) => !(await i(reqConfig, config)))) return reqConfig.cachedResult || {}
+    for (let i of preInterceptors) {
+        reqConfig = await i(reqConfig, config)
+    }
+    if (reqConfig.enabled ===  false) return reqConfig.cachedResult || {}
 
     let result: FlowResult<ResponseData, ErrorType>
     try {
@@ -111,7 +120,7 @@ export class Flow {
 }
 
 const getPayloadHashCode = (reqConfig: FlowRequestConfig) => {
-    const str = JSON.stringify(reqConfig.data)
+    const str = JSON.stringify(reqConfig.data || '{}')
     let hash = 0, i, chr
     if (str.length === 0) return hash;
         for (i = 0; i < str.length; i++) {
